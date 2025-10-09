@@ -41,24 +41,7 @@ def fetch_option_chain():
     session.get("https://www.nseindia.com", headers=headers)
     response = session.get(url, headers=headers)
     data = response.json()
-    return data["records"]["data"]
-# Function to process option chain data
-def process_option_chain(data):
-    rows = []
-    for item in data:
-        strike = item.get("strikePrice")
-        ce_oi = item.get("CE", {}).get("openInterest", 0)
-        pe_oi = item.get("PE", {}).get("openInterest", 0)
-        total_oi = ce_oi + pe_oi
-        rows.append({
-            "Strike Price": strike,
-            "CE OI": ce_oi,
-            "PE OI": pe_oi,
-            "Total OI": total_oi
-        })
-    df = pd.DataFrame(rows)
-    df_sorted = df.sort_values(by="Total OI", ascending=False).reset_index(drop=True)
-    return df_sorted
+    return data["records"]["data"] 
     
 # Function to interpret sentiment
 def interpret_sentiment(ltp, ce_oi_change, pe_oi_change):
