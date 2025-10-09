@@ -47,13 +47,13 @@ def fetch_option_chain():
 def interpret_sentiment(ltp, ce_oi_change, pe_oi_change):
     last_ltp = st.session_state.last_ltp
     if ce_oi_change > pe_oi_change and ltp < last_ltp:
-        return "Short Buildup", "Sell"
+        return "Short Buildup", "Buy-PE" #Sell
     elif ce_oi_change < pe_oi_change and ltp > last_ltp:
-        return "Long Buildup", "Buy"
+        return "Long Buildup", "Buy-CE" #Buy
     elif ce_oi_change < pe_oi_change and ltp < last_ltp:
-        return "Long Unwinding", "Sell"
+        return "Long Unwinding", "Buy-PE" #Sell
     elif ce_oi_change > pe_oi_change and ltp > last_ltp:
-        return "Short Covering", "Buy"
+        return "Short Covering", "Buy-PE" #Buy
     else:
         return "Neutral", "Hold"
 
