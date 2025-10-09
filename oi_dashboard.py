@@ -1,116 +1,113 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
 import requests
-from openpyxl import Workbook
+import datetime
+import matplotlib.pyplot as plt
+from io import BytesIO
 
 # Initialize session state for logs
 if "five_min_log" not in st.session_state:
     st.session_state.five_min_log = []
+
 if "fifteen_min_log" not in st.session_state:
     st.session_state.fifteen_min_log = []
-if "last_ltp" not in st.session_state:
-    st.session_state.last_ltp = 0
 
-# Function to fetch NIFTY LTP using NSE market status API
-def fetch_nifty_ltp():
-    url = "https://www.nseindia.com/api/marketStatus"
-    headers = {
-        "User-Agent": "Mozilla/5.0",
-        "Accept": "*/*",
-        "Referer": "https://www.nseindia.com"
-    }
-    session = requests.Session()
-    session.get("https://www.nseindia.com", headers=headers)
-    response = session.get(url, headers=headers)
-    data = response.json()
-    for index in data["marketState"]:
-        if index["index"] == "NIFTY 50":
-            return float(index["last"])
-    return None
+if "last_fifteen_log_time" not in st.session_state:
+    st.session_state.last_fifteen_log_time = None
 
-# Function to fetch option chain data
+# Function to fetch NIFTY option chain data
 def fetch_option_chain():
     url = "https://www.nseindia.com/api/option-chain-indices?symbol=NIFTY"
     headers = {
         "User-Agent": "Mozilla/5.0",
-        "Accept": "*/*",
-        "Referer": "https://www.nseindia.com"
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": "https://www.nseindia.com/"
     }
     session = requests.Session()
     session.get("https://www.nseindia.com", headers=headers)
     response = session.get(url, headers=headers)
     data = response.json()
-    return data["records"]["data"]
+    return data
 
-# Function to interpret sentiment
-def interpret_sentiment(ltp, ce_oi_change, pe_oi_change):
-    last_ltp = st.session_state.last_ltp
-    if ce_oi_change > pe_oi_change and ltp < last_ltp:
-        return "Short Buildup", "Sell"
-    elif ce_oi_change < pe_oi_change and ltp > last_ltp:
-        return "Long Buildup", "Buy"
-    elif ce_oi_change < pe_oi_change and ltp < last_ltp:
-        return "Long Unwinding", "Sell"
-    elif ce_oi_change > pe_oi_change and ltp > last_ltp:
-        return "Short Covering", "Buy"
-    else:
-        return "Neutral", "Hold"
+# Function to process option chain data
+def process_data(data):
+    records = data["records"]["data"]
+    ce_oi_change = 0
+    pe_oi_change = 0
+    for item in records:
+        ce = item.get("CE")
+        pe = item.get("PE")
+        if ce:
+            ce_oi_change += ce.get("changeinOpenInterest", 0)
+        if pe:
+            pe_oi_change += pe.get("changeinOpenInterest", 0)
 
-# Streamlit UI
-st.title("NIFTY OI Analysis Dashboard")
-st.sidebar.header("Controls")
+    signal = "Neutral"
+    if ce_oi_change < pe_oi_change:
+        signal = "Buy"
+    elif ce_oi_change > pe_oi_change:
+        signal = "Sell"
 
+    pcr = round(pe_oi_change / ce_oi_change, 2) if ce_oi_change != 0 else None
+
+    return {
+        "Time": datetime.datetime.now().strftime("%H:%M:%S"),
+        "CE OI Change": ce_oi_change,
+        "PE OI Change": pe_oi_change,
+        "Signal": signal,
+        "PCR": pcr
+    }
+
+# Sidebar button to fetch data
+st.sidebar.title("OI Dashboard")
 if st.sidebar.button("Fetch Latest Data"):
     try:
-        ltp = fetch_nifty_ltp()
-        option_data = fetch_option_chain()
+        data = fetch_option_chain()
+        entry = process_data(data)
+        st.session_state.five_min_log.append(entry)
 
-        ce_oi_total = sum(item.get("CE", {}).get("openInterest", 0) for item in option_data if "CE" in item)
-        pe_oi_total = sum(item.get("PE", {}).get("openInterest", 0) for item in option_data if "PE" in item)
-
-        ce_oi_change = sum(item.get("CE", {}).get("changeinOpenInterest", 0) for item in option_data if "CE" in item)
-        pe_oi_change = sum(item.get("PE", {}).get("changeinOpenInterest", 0) for item in option_data if "PE" in item)
-
-        sentiment, signal = interpret_sentiment(ltp, ce_oi_change, pe_oi_change)
-
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        log_entry = {
-            "Timestamp": timestamp,
-            "LTP": ltp,
-            "CE OI": ce_oi_total,
-            "PE OI": pe_oi_total,
-            "CE OI Change": ce_oi_change,
-            "PE OI Change": pe_oi_change,
-            "Sentiment": sentiment,
-            "Signal": signal
-        }
-
-        st.session_state.five_min_log.append(log_entry)
-        if len(st.session_state.five_min_log) % 3 == 0:
-            st.session_state.fifteen_min_log.append(log_entry)
-
-        st.session_state.last_ltp = ltp
-        st.success("Data fetched and logged successfully.")
+        # Log to 15-min if time difference is >= 15 minutes
+        now = datetime.datetime.now()
+        if st.session_state.last_fifteen_log_time is None or (now - st.session_state.last_fifteen_log_time).seconds >= 900:
+            st.session_state.fifteen_min_log.append(entry)
+            st.session_state.last_fifteen_log_time = now
 
     except Exception as e:
         st.error(f"Error fetching data: {e}")
 
-# Display logs
+# Display 5-min log
 st.subheader("5-Minute Log")
 df_5min = pd.DataFrame(st.session_state.five_min_log)
 st.dataframe(df_5min)
 
+# PCR Trend Chart
+if not df_5min.empty and "PCR" in df_5min.columns:
+    st.subheader("PCR Trend Chart")
+    fig, ax = plt.subplots()
+    ax.plot(df_5min["Time"], df_5min["PCR"], marker='o', linestyle='-')
+    ax.set_xlabel("Time")
+    ax.set_ylabel("PCR")
+    ax.set_title("Put-Call Ratio Over Time")
+    plt.xticks(rotation=45)
+    st.pyplot(fig)
+
+# Display 15-min log
 st.subheader("15-Minute Log")
 df_15min = pd.DataFrame(st.session_state.fifteen_min_log)
 st.dataframe(df_15min)
 
-# Excel export
-def export_to_excel():
-    with pd.ExcelWriter("OIAnalysisDashboard.xlsx", engine="openpyxl") as writer:
-        df_5min.to_excel(writer, sheet_name="FiveMin", index=False)
-        df_15min.to_excel(writer, sheet_name="FifteenMin", index=False)
+# Download Excel
+def generate_excel():
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df_5min.to_excel(writer, index=False, sheet_name="FiveMinLog")
+        df_15min.to_excel(writer, index=False, sheet_name="FifteenMinLog")
+    output.seek(0)
+    return output
 
-if st.sidebar.button("Download Excel"):
-    export_to_excel()
-    st.success("Excel file 'OIAnalysisDashboard.xlsx' has been created.")
+st.sidebar.download_button(
+    label="Download Excel",
+    data=generate_excel(),
+    file_name="OIAnalysisDashboard.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+)
