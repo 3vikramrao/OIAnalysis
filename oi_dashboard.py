@@ -105,6 +105,12 @@ st.subheader("15-Minute Log")
 df_15min = pd.DataFrame(st.session_state.fifteen_min_log)
 st.dataframe(df_15min)
 
+# Display Option Chain OI Analysis
+st.subheader("Nifty Option Chain OI Analysis")
+if "option_chain_data" in locals():
+    df_option_chain = process_option_chain(option_chain_data)
+    st.dataframe(df_option_chain)
+    
 # Excel export
 def export_to_excel():
     with pd.ExcelWriter("OIAnalysisDashboard.xlsx", engine="openpyxl") as writer:
