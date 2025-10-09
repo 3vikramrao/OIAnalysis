@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
-from nsepython import *
-from datetime import datetime
+from nsepython import nse_index, nse_optionchain_scrapper
+from datetime import datetime, timedelta
 import io
 
 # Initialize session state for logs
@@ -9,99 +9,107 @@ if "five_min_log" not in st.session_state:
     st.session_state.five_min_log = []
 if "fifteen_min_log" not in st.session_state:
     st.session_state.fifteen_min_log = []
+if "last_fifteen_log_time" not in st.session_state:
+    st.session_state.last_fifteen_log_time = None
 
-# Title
-st.title("📊 NIFTY Open Interest Analysis Dashboard")
+st.title("📊 NIFTY Open Interest Dashboard")
 
 # Sidebar controls
-st.sidebar.header("Controls")
-fetch_data = st.sidebar.button("Fetch Latest Data")
-export_excel = st.sidebar.button("Download Excel")
-
-# Function to interpret OI changes
-def interpret_oi_change(prev, curr):
-    if not prev:
-        return "N/A"
-    ltp_change = curr["LTP"] - prev["LTP"]
-    oi_change = curr["OI"] - prev["OI"]
-    if ltp_change > 0 and oi_change > 0:
-        return "Long Buildup"
-    elif ltp_change < 0 and oi_change > 0:
-        return "Short Buildup"
-    elif ltp_change < 0 and oi_change < 0:
-        return "Long Unwinding"
-    elif ltp_change > 0 and oi_change < 0:
-        return "Short Covering"
-    else:
-        return "Neutral"
-
-# Function to fetch and process data
-def fetch_nifty_data():
+if st.sidebar.button("Fetch Latest Data"):
     try:
-        eq_data = nse_eq("NIFTY")
-        fut_data = nse_fno("NIFTY")
+        # Fetch NIFTY index data
+        index_data = nse_index("NIFTY 50")
+        ltp = index_data.get("last", None)
+        volume = index_data.get("volume", None)
+
+        # Fetch option chain data
         oc_data = nse_optionchain_scrapper("NIFTY")
+        records = oc_data.get("records", {}).get("data", [])
 
-        ltp = float(eq_data["priceInfo"]["lastPrice"])
-        oi = int(fut_data["marketDeptOrderBook"]["totalBuyQuantity"])
-        vol = int(eq_data["priceInfo"]["quantityTraded"])
-
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        current_data = {"Timestamp": timestamp, "LTP": ltp, "OI": oi, "Volume": vol}
-
-        # Interpret OI change
-        prev_data = st.session_state.five_min_log[-1] if st.session_state.five_min_log else None
-        signal = interpret_oi_change(prev_data, current_data)
-        current_data["Signal"] = signal
-
-        # Append to logs
-        st.session_state.five_min_log.append(current_data)
-        if len(st.session_state.five_min_log) % 3 == 0:
-            st.session_state.fifteen_min_log.append(current_data)
-
-        # Option Chain Table
-        ce_data = []
-        pe_data = []
-        for item in oc_data["records"]["data"]:
+        # Process option chain data
+        option_rows = []
+        total_ce_oi = 0
+        total_pe_oi = 0
+        for item in records:
             strike = item.get("strikePrice")
-            ce_oi = item.get("CE", {}).get("openInterest", 0)
-            pe_oi = item.get("PE", {}).get("openInterest", 0)
-            ce_data.append({"Strike": strike, "CE OI": ce_oi})
-            pe_data.append({"Strike": strike, "PE OI": pe_oi})
-        option_chain_df = pd.DataFrame(ce_data).merge(pd.DataFrame(pe_data), on="Strike")
+            ce = item.get("CE", {})
+            pe = item.get("PE", {})
+            ce_oi = ce.get("openInterest", 0)
+            pe_oi = pe.get("openInterest", 0)
+            total_ce_oi += ce_oi
+            total_pe_oi += pe_oi
+            option_rows.append({
+                "Strike": strike,
+                "CE OI": ce_oi,
+                "PE OI": pe_oi
+            })
 
-        return current_data, option_chain_df
+        # Create DataFrame
+        option_df = pd.DataFrame(option_rows).sort_values("Strike")
+
+        # Display index data
+        st.subheader("📈 NIFTY Index Data")
+        st.write(f"**LTP:** {ltp}")
+        st.write(f"**Volume:** {volume}")
+        st.write(f"**Total CE OI:** {total_ce_oi}")
+        st.write(f"**Total PE OI:** {total_pe_oi}")
+
+        # Display option chain
+        st.subheader("🔗 Option Chain")
+        st.dataframe(option_df)
+
+        # Determine market sentiment
+        sentiment = "Neutral"
+        signal = "Hold"
+        if total_ce_oi > total_pe_oi and ltp is not None:
+            sentiment = "Bearish"
+            signal = "Sell"
+        elif total_pe_oi > total_ce_oi and ltp is not None:
+            sentiment = "Bullish"
+            signal = "Buy"
+
+        st.subheader("📌 Market Sentiment")
+        st.write(f"**Sentiment:** {sentiment}")
+        st.write(f"**Signal:** {signal}")
+
+        # Log data
+        now = datetime.now()
+        log_entry = {
+            "Time": now.strftime("%H:%M:%S"),
+            "LTP": ltp,
+            "Volume": volume,
+            "Total CE OI": total_ce_oi,
+            "Total PE OI": total_pe_oi,
+            "Sentiment": sentiment,
+            "Signal": signal
+        }
+        st.session_state.five_min_log.append(log_entry)
+
+        # Log every 15 minutes
+        if (st.session_state.last_fifteen_log_time is None or
+            now - st.session_state.last_fifteen_log_time >= timedelta(minutes=15)):
+            st.session_state.fifteen_min_log.append(log_entry)
+            st.session_state.last_fifteen_log_time = now
+
     except Exception as e:
         st.error(f"Error fetching data: {e}")
-        return None, None
-
-# Fetch data on button click
-if fetch_data:
-    latest_data, option_chain = fetch_nifty_data()
-    if latest_data:
-        st.subheader("📈 Latest NIFTY Futures Data")
-        st.write(pd.DataFrame([latest_data]))
-
-        st.subheader("📊 Option Chain Data")
-        st.dataframe(option_chain)
 
 # Display logs
-if st.session_state.five_min_log:
-    st.subheader("🕔 5-Minute Log")
-    st.dataframe(pd.DataFrame(st.session_state.five_min_log))
+st.subheader("🕔 5-Minute Log")
+st.dataframe(pd.DataFrame(st.session_state.five_min_log))
 
-if st.session_state.fifteen_min_log:
-    st.subheader("🕒 15-Minute Log")
-    st.dataframe(pd.DataFrame(st.session_state.fifteen_min_log))
+st.subheader("🕒 15-Minute Log")
+st.dataframe(pd.DataFrame(st.session_state.fifteen_min_log))
 
 # Export to Excel
-if export_excel:
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        pd.DataFrame(st.session_state.five_min_log).to_excel(writer, sheet_name="FiveMin", index=False)
-        pd.DataFrame(st.session_state.fifteen_min_log).to_excel(writer, sheet_name="FifteenMin", index=False)
-        if "option_chain" in locals():
-            option_chain.to_excel(writer, sheet_name="OptionChain", index=False)
-    st.download_button("📥 Download Excel File", data=output.getvalue(), file_name="OIAnalysisDashboard.xlsx")
-
-
+if st.sidebar.button("Download Excel"):
+    try:
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:
+            pd.DataFrame(st.session_state.five_min_log).to_excel(writer, sheet_name="FiveMin", index=False)
+            pd.DataFrame(st.session_state.fifteen_min_log).to_excel(writer, sheet_name="FifteenMin", index=False)
+            if "option_df" in locals():
+                option_df.to_excel(writer, sheet_name="OptionChain", index=False)
+        st.download_button("Download OIAnalysisDashboard.xlsx", data=output.getvalue(), file_name="OIAnalysisDashboard.xlsx")
+    except Exception as e:
+        st.error(f"Error exporting Excel: {e}")
