@@ -1,6 +1,7 @@
-streamlit
-pandas
-requests
-openpyxl
-matplotlib
+streamlit>=1.0
+pandas>=1.0
+requests>=2.0
+matplotlib>=3.0
+openpyxl>=3.0
+
 
