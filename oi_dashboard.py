@@ -73,7 +73,10 @@ if st.sidebar.button("Fetch Latest Data"):
 
         sentiment, signal = interpret_sentiment(ltp, ce_oi_change, pe_oi_change)
 
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        #timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+		st = pytz.timezone('Asia/Kolkata')
+		timestamp = datetime.now(ist).strftime("%Y-%m-%d %H:%M:%S")
+
         log_entry = {
             "Timestamp": timestamp,
             "LTP": ltp,
