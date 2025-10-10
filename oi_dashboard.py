@@ -73,10 +73,7 @@ if st.sidebar.button("Fetch Latest Data"):
 
         sentiment, signal = interpret_sentiment(ltp, ce_oi_change, pe_oi_change)
 
-        
-		st = pytz.timezone('Asia/Kolkata')
-		timestamp = datetime.now(ist).strftime("%Y-%m-%d %H:%M:%S")
-
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         log_entry = {
             "Timestamp": timestamp,
             "LTP": ltp,
@@ -109,9 +106,7 @@ if st.sidebar.button("Fetch Latest Data"):
                 "CE LTP": ce.get("lastPrice"),
                 "PE OI": pe.get("openInterest"),
                 "PE Change OI": pe.get("changeinOpenInterest"),
-                "PE LTP": pe.get("lastPrice"),
-				"Sentiment": sentiment,
-            	"Signal": signal
+                "PE LTP": pe.get("lastPrice")
             })
         df_option_chain = pd.DataFrame(table_data)
         st.dataframe(df_option_chain)
