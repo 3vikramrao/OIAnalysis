@@ -106,8 +106,8 @@ if st.sidebar.button("Fetch Latest Data"):
                 "CE LTP": ce.get("lastPrice"),
                 "PE OI": pe.get("openInterest"),
                 "PE Change OI": pe.get("changeinOpenInterest"),
-                "PE LTP": pe.get("lastPrice")
-		"Sentiment": sentiment,
+                "PE LTP": pe.get("lastPrice"),
+				"Sentiment": sentiment,
             	"Signal": signal
             })
         df_option_chain = pd.DataFrame(table_data)
