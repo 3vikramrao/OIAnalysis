@@ -2,16 +2,12 @@ import streamlit as st
 import pandas as pd
 import requests
 from datetime import datetime
-from openpyxl import Workbook
 
-# Sidebar input for custom auto-refresh interval
+# Sidebar input for custom auto-refresh interval (in minutes)
 refresh_interval_min = st.sidebar.number_input("Auto-refresh interval (minutes)", min_value=1, value=5)
-refresh_interval_ms = refresh_interval_min * 60 * 1000
+refresh_interval_sec = refresh_interval_min * 60
 
-# Display message about auto-refresh
-st.sidebar.markdown(f"Dashboard will auto-refresh every {refresh_interval_min} minute(s).")
-
-# Initialize session state for logs
+# Initialize session state
 if "five_min_log" not in st.session_state:
     st.session_state.five_min_log = []
 if "fifteen_min_log" not in st.session_state:
@@ -19,7 +15,7 @@ if "fifteen_min_log" not in st.session_state:
 if "last_ltp" not in st.session_state:
     st.session_state.last_ltp = 0
 
-# Function to fetch NIFTY LTP using NSE market status API
+# Function to fetch NIFTY LTP
 def fetch_nifty_ltp(session):
     url = "https://www.nseindia.com/api/marketStatus"
     response = session.get(url)
@@ -54,17 +50,18 @@ def interpret_sentiment(ltp, ce_oi_change, pe_oi_change):
 st.title("NIFTY OI Analysis Dashboard")
 st.sidebar.header("Controls")
 
+# Setup session with headers
+session = requests.Session()
+session.headers.update({
+    "User-Agent": "Mozilla/5.0",
+    "Accept": "*/*",
+    "Referer": "https://www.nseindia.com"
+})
+session.get("https://www.nseindia.com")
+
+# Button to fetch latest data
 if st.sidebar.button("Fetch Latest Data"):
     try:
-        # Setup session with headers
-        session = requests.Session()
-        session.headers.update({
-            "User-Agent": "Mozilla/5.0",
-            "Accept": "*/*",
-            "Referer": "https://www.nseindia.com"
-        })
-        session.get("https://www.nseindia.com")  # Establish session
-
         ltp = fetch_nifty_ltp(session)
         option_data = fetch_option_chain(session)
 
@@ -95,6 +92,25 @@ if st.sidebar.button("Fetch Latest Data"):
         st.session_state.last_ltp = ltp
         st.success("Data fetched and logged successfully.")
 
+        # Display Option Chain OI Analysis Table
+        st.subheader("Nifty Option Chain OI Analysis")
+        table_data = []
+        for item in option_data:
+            strike = item.get("strikePrice")
+            ce = item.get("CE", {})
+            pe = item.get("PE", {})
+            table_data.append({
+                "Strike Price": strike,
+                "CE OI": ce.get("openInterest"),
+                "CE Change OI": ce.get("changeinOpenInterest"),
+                "CE LTP": ce.get("lastPrice"),
+                "PE OI": pe.get("openInterest"),
+                "PE Change OI": pe.get("changeinOpenInterest"),
+                "PE LTP": pe.get("lastPrice")
+            })
+        df_option_chain = pd.DataFrame(table_data)
+        st.dataframe(df_option_chain)
+
     except Exception as e:
         st.error(f"Error fetching data: {e}")
 
@@ -107,17 +123,13 @@ st.subheader("15-Minute Log")
 df_15min = pd.DataFrame(st.session_state.fifteen_min_log)
 st.dataframe(df_15min)
 
-# Display Option Chain OI Analysis Description
-st.subheader("Nifty Option Chain OI Analysis")
-st.markdown("""
-Script fetches Nifty Option Chain data every 5 minutes for every strike price from the official NSE website (https://www1.nseindia.com/) and saves it inside `OptionChain.xlsm`. This data is saved in the **Master** sheet which is further used by the **Pivot Table** sheet to filter out data based on strike prices.
-""")
-
 # Excel export
 def export_to_excel():
     with pd.ExcelWriter("OIAnalysisDashboard.xlsx", engine="openpyxl") as writer:
         df_5min[["LTP", "CE OI", "PE OI", "CE OI Change", "PE OI Change", "Sentiment", "Signal"]].to_excel(writer, sheet_name="FiveMin", index=False)
         df_15min[["LTP", "CE OI", "PE OI", "CE OI Change", "PE OI Change", "Sentiment", "Signal"]].to_excel(writer, sheet_name="FifteenMin", index=False)
+        if 'df_option_chain' in locals():
+            df_option_chain.to_excel(writer, sheet_name="OptionChain", index=False)
 
 if st.sidebar.button("Download Excel"):
     export_to_excel()
