@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 import requests
+import matplotlib.pyplot as plt
 from openpyxl import Workbook
 
 # Initialize session state for logs
@@ -12,17 +13,19 @@ if "fifteen_min_log" not in st.session_state:
 if "last_ltp" not in st.session_state:
     st.session_state.last_ltp = 0
 
+# Setup session with cookie handling
+session = requests.Session()
+session.headers.update({
+    "User-Agent": "Mozilla/5.0",
+    "Accept": "*/*",
+    "Referer": "https://www.nseindia.com"
+})
+session.get("https://www.nseindia.com")  # Establish session
+
 # Function to fetch NIFTY LTP using NSE market status API
 def fetch_nifty_ltp():
     url = "https://www.nseindia.com/api/marketStatus"
-    headers = {
-        "User-Agent": "Mozilla/5.0",
-        "Accept": "*/*",
-        "Referer": "https://www.nseindia.com"
-    }
-    session = requests.Session()
-    session.get("https://www.nseindia.com", headers=headers)
-    response = session.get(url, headers=headers)
+    response = session.get(url)
     data = response.json()
     for index in data["marketState"]:
         if index["index"] == "NIFTY 50":
@@ -32,17 +35,10 @@ def fetch_nifty_ltp():
 # Function to fetch option chain data
 def fetch_option_chain():
     url = "https://www.nseindia.com/api/option-chain-indices?symbol=NIFTY"
-    headers = {
-        "User-Agent": "Mozilla/5.0",
-        "Accept": "*/*",
-        "Referer": "https://www.nseindia.com"
-    }
-    session = requests.Session()
-    session.get("https://www.nseindia.com", headers=headers)
-    response = session.get(url, headers=headers)
+    response = session.get(url)
     data = response.json()
-    return data["records"]["data"] 
-    
+    return data["records"]["data"]
+
 # Function to interpret sentiment
 def interpret_sentiment(ltp, ce_oi_change, pe_oi_change):
     last_ltp = st.session_state.last_ltp
@@ -56,6 +52,25 @@ def interpret_sentiment(ltp, ce_oi_change, pe_oi_change):
         return "Short Covering", "Buy"
     else:
         return "Neutral", "Hold"
+
+# Function to plot OI vs Strike Price
+def plot_oi_vs_ltp(option_data):
+    ce_data = [(item["strikePrice"], item["CE"]["openInterest"])
+               for item in option_data if "CE" in item and "openInterest" in item["CE"]]
+    pe_data = [(item["strikePrice"], item["PE"]["openInterest"])
+               for item in option_data if "PE" in item and "openInterest" in item["PE"]]
+
+    ce_df = pd.DataFrame(ce_data, columns=["Strike", "CE OI"])
+    pe_df = pd.DataFrame(pe_data, columns=["Strike", "PE OI"])
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.plot(ce_df["Strike"], ce_df["CE OI"], label="Call OI", color="blue")
+    ax.plot(pe_df["Strike"], pe_df["PE OI"], label="Put OI", color="red")
+    ax.set_xlabel("Strike Price")
+    ax.set_ylabel("Open Interest")
+    ax.set_title("OI vs Strike Price")
+    ax.legend()
+    st.pyplot(fig)
 
 # Streamlit UI
 st.title("NIFTY OI Analysis Dashboard")
@@ -106,17 +121,20 @@ df_15min = pd.DataFrame(st.session_state.fifteen_min_log)
 st.dataframe(df_15min)
 
 # Display Option Chain OI Analysis
-st.subheader("Nifty Option Chain OI Analysis")
-if "option_chain_data" in locals():
-    df_option_chain = process_option_chain(option_chain_data)
-    st.dataframe(df_option_chain)
-    
+st.subheader("Nifty Option Chain OI vs Strike Price")
+try:
+    option_data = fetch_option_chain()
+    plot_oi_vs_ltp(option_data)
+except:
+    st.warning("Unable to fetch option chain data for plotting.")
+
 # Excel export
 def export_to_excel():
     with pd.ExcelWriter("OIAnalysisDashboard.xlsx", engine="openpyxl") as writer:
-        df_5min.to_excel(writer, sheet_name="FiveMin", index=False)
-        df_15min.to_excel(writer, sheet_name="FifteenMin", index=False)
+        df_5min[["LTP", "CE OI", "PE OI", "CE OI Change", "PE OI Change", "Sentiment", "Signal"]].to_excel(writer, sheet_name="FiveMin", index=False)
+        df_15min[["LTP", "CE OI", "PE OI", "CE OI Change", "PE OI Change", "Sentiment", "Signal"]].to_excel(writer, sheet_name="FifteenMin", index=False)
 
 if st.sidebar.button("Download Excel"):
     export_to_excel()
     st.success("Excel file 'OIAnalysisDashboard.xlsx' has been created.")
+
