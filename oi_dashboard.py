@@ -1,9 +1,15 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
 import requests
-import matplotlib.pyplot as plt
+from datetime import datetime
 from openpyxl import Workbook
+
+# Sidebar input for custom auto-refresh interval
+refresh_interval_min = st.sidebar.number_input("Auto-refresh interval (minutes)", min_value=1, value=5)
+refresh_interval_ms = refresh_interval_min * 60 * 1000
+
+# Display message about auto-refresh
+st.sidebar.markdown(f"Dashboard will auto-refresh every {refresh_interval_min} minute(s).")
 
 # Initialize session state for logs
 if "five_min_log" not in st.session_state:
@@ -13,17 +19,8 @@ if "fifteen_min_log" not in st.session_state:
 if "last_ltp" not in st.session_state:
     st.session_state.last_ltp = 0
 
-# Setup session with cookie handling
-session = requests.Session()
-session.headers.update({
-    "User-Agent": "Mozilla/5.0",
-    "Accept": "*/*",
-    "Referer": "https://www.nseindia.com"
-})
-session.get("https://www.nseindia.com")  # Establish session
-
 # Function to fetch NIFTY LTP using NSE market status API
-def fetch_nifty_ltp():
+def fetch_nifty_ltp(session):
     url = "https://www.nseindia.com/api/marketStatus"
     response = session.get(url)
     data = response.json()
@@ -33,7 +30,7 @@ def fetch_nifty_ltp():
     return None
 
 # Function to fetch option chain data
-def fetch_option_chain():
+def fetch_option_chain(session):
     url = "https://www.nseindia.com/api/option-chain-indices?symbol=NIFTY"
     response = session.get(url)
     data = response.json()
@@ -53,33 +50,23 @@ def interpret_sentiment(ltp, ce_oi_change, pe_oi_change):
     else:
         return "Neutral", "Hold"
 
-# Function to plot OI vs Strike Price
-def plot_oi_vs_ltp(option_data):
-    ce_data = [(item["strikePrice"], item["CE"]["openInterest"])
-               for item in option_data if "CE" in item and "openInterest" in item["CE"]]
-    pe_data = [(item["strikePrice"], item["PE"]["openInterest"])
-               for item in option_data if "PE" in item and "openInterest" in item["PE"]]
-
-    ce_df = pd.DataFrame(ce_data, columns=["Strike", "CE OI"])
-    pe_df = pd.DataFrame(pe_data, columns=["Strike", "PE OI"])
-
-    fig, ax = plt.subplots(figsize=(10, 5))
-    ax.plot(ce_df["Strike"], ce_df["CE OI"], label="Call OI", color="blue")
-    ax.plot(pe_df["Strike"], pe_df["PE OI"], label="Put OI", color="red")
-    ax.set_xlabel("Strike Price")
-    ax.set_ylabel("Open Interest")
-    ax.set_title("OI vs Strike Price")
-    ax.legend()
-    st.pyplot(fig)
-
 # Streamlit UI
 st.title("NIFTY OI Analysis Dashboard")
 st.sidebar.header("Controls")
 
 if st.sidebar.button("Fetch Latest Data"):
     try:
-        ltp = fetch_nifty_ltp()
-        option_data = fetch_option_chain()
+        # Setup session with headers
+        session = requests.Session()
+        session.headers.update({
+            "User-Agent": "Mozilla/5.0",
+            "Accept": "*/*",
+            "Referer": "https://www.nseindia.com"
+        })
+        session.get("https://www.nseindia.com")  # Establish session
+
+        ltp = fetch_nifty_ltp(session)
+        option_data = fetch_option_chain(session)
 
         ce_oi_total = sum(item.get("CE", {}).get("openInterest", 0) for item in option_data if "CE" in item)
         pe_oi_total = sum(item.get("PE", {}).get("openInterest", 0) for item in option_data if "PE" in item)
@@ -120,13 +107,11 @@ st.subheader("15-Minute Log")
 df_15min = pd.DataFrame(st.session_state.fifteen_min_log)
 st.dataframe(df_15min)
 
-# Display Option Chain OI Analysis
-st.subheader("Nifty Option Chain OI vs Strike Price")
-try:
-    option_data = fetch_option_chain()
-    plot_oi_vs_ltp(option_data)
-except:
-    st.warning("Unable to fetch option chain data for plotting.")
+# Display Option Chain OI Analysis Description
+st.subheader("Nifty Option Chain OI Analysis")
+st.markdown("""
+Script fetches Nifty Option Chain data every 5 minutes for every strike price from the official NSE website (https://www1.nseindia.com/) and saves it inside `OptionChain.xlsm`. This data is saved in the **Master** sheet which is further used by the **Pivot Table** sheet to filter out data based on strike prices.
+""")
 
 # Excel export
 def export_to_excel():
@@ -137,4 +122,3 @@ def export_to_excel():
 if st.sidebar.button("Download Excel"):
     export_to_excel()
     st.success("Excel file 'OIAnalysisDashboard.xlsx' has been created.")
-
