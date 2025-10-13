@@ -91,6 +91,14 @@ if st.sidebar.button("Fetch Latest Data"):
 
         st.session_state.last_ltp = ltp
         st.success("Data fetched and logged successfully.")
+        # Display logs
+        st.subheader("5-Minute Log")
+        df_5min = pd.DataFrame(st.session_state.five_min_log)
+        st.dataframe(df_5min)
+
+        st.subheader("15-Minute Log")
+        df_15min = pd.DataFrame(st.session_state.fifteen_min_log)
+        st.dataframe(df_15min)
 
         # Display Option Chain OI Analysis Table
         st.subheader("Nifty Option Chain OI Analysis")
@@ -113,15 +121,6 @@ if st.sidebar.button("Fetch Latest Data"):
 
     except Exception as e:
         st.error(f"Error fetching data: {e}")
-
-# Display logs
-st.subheader("5-Minute Log")
-df_5min = pd.DataFrame(st.session_state.five_min_log)
-st.dataframe(df_5min)
-
-st.subheader("15-Minute Log")
-df_15min = pd.DataFrame(st.session_state.fifteen_min_log)
-st.dataframe(df_15min)
 
 # Excel export
 def export_to_excel():
